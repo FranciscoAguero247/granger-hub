@@ -127,12 +127,21 @@ export default function GrangerLauncher() {
   const [showPwaModal, setShowPwaModal] = useState(false);
   const [announcements, setAnnouncements] = useState<WardAnnouncement[]>([]);
   const [activeFlyer, setActiveFlyer] = useState<{ url: string; title: string } | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   useEffect(() => {
-    getLiveAnnouncements().then(setAnnouncements);
+    setIsRefreshing(true);
+    getLiveAnnouncements().then((data) => {
+      setAnnouncements(data);
+      setIsRefreshing(false);
+    });
 
     const intervalId = setInterval(() => {
-      getLiveAnnouncements().then(setAnnouncements);
+      setIsRefreshing(true);
+      getLiveAnnouncements().then((data) => {
+        setAnnouncements(data);
+        setIsRefreshing(false);
+      });
     }, 30000);
     return () => clearInterval(intervalId);
   }, []);
@@ -140,7 +149,6 @@ export default function GrangerLauncher() {
   return (
     <main className="min-h-screen bg-gradient-to-b from-slate-100 to-slate-200/80 flex items-center justify-center p-4 md:p-8 font-sans text-slate-900">
       <div className="w-full max-w-5xl bg-white rounded-3xl shadow-xl border border-slate-200 overflow-hidden">
-        {/* Header Banner */}
         <div className="bg-indigo-600 text-white p-6 md:p-8 text-center relative">
           <span className="text-[10px] md:text-xs font-black tracking-widest uppercase bg-indigo-500 text-indigo-100 px-2.5 py-1 rounded-full border border-indigo-400">
             {WARD_CONFIG.stakeName}
@@ -158,10 +166,42 @@ export default function GrangerLauncher() {
             <h2 className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
               📢 Live Ward Announcements
             </h2>
-            <span className="flex h-2 w-2 relative">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-            </span>
+
+            <div className="flex items-center gap-1.5 bg-white px-2 py-1 rounded-full border border-slate-200 shadow-xs">
+              {isRefreshing ? (
+                <>
+                    <svg
+                      className="animate-spin h-2.5 w-2.5 text-indigo-600"
+                      xmlns="http://www.w3.org/2000/svg"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                    >
+                      <circle
+                        className="opacity-25"
+                        cx="12"
+                        cy="12"
+                        r="10"
+                        stroke="currentColor"
+                        strokeWidth="4"
+                      ></circle>
+                      <path
+                        className="opacity-75"
+                        fill="currentColor"
+                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                      ></path>
+                    </svg>
+                    <span className="text-[9px] font-semibold text-indigo-600">Syncing...</span>
+                  </>
+                ) : (
+                  <>
+                    <span className="flex h-2 w-2 relative">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                    </span>
+                    <span className="text-[9px] font-semibold text-slate-500">Live</span>
+                  </>
+                )}
+              </div>
           </div>
 
           <div className="space-y-3">
