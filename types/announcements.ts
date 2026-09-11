@@ -4,6 +4,7 @@ export interface WardAnnouncement {
   date: string;
   category: string;
   ImageURL?: string;
+  imageWarning?: string;
 }
 
 export interface LiveFeedSnapshot {

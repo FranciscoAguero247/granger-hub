@@ -114,8 +114,10 @@ function normalizeAnnouncements(csvText: string): WardAnnouncement[] {
     .slice(1)
     .map((line) => {
       const cols = parseCSVRow(line);
-      const imageUrl = normalizeImageUrl(cols[4] || '');
+      const rawImageUrl = cols[4] || '';
+      const imageUrl = normalizeImageUrl(rawImageUrl);
       const rawTitle = cols[0] || '';
+      const hasRejectedImageUrl = rawImageUrl.trim() !== '' && imageUrl === '';
 
       return {
         title: rawTitle || (imageUrl ? 'Event Flyer' : ''),
@@ -123,9 +125,12 @@ function normalizeAnnouncements(csvText: string): WardAnnouncement[] {
         date: cols[2] || '',
         category: cols[3] || 'Flyer',
         ImageURL: imageUrl,
+        imageWarning: hasRejectedImageUrl
+          ? 'Image link was rejected. Use a direct image URL such as Google Drive raw image links or i.postimg.cc image files.'
+          : undefined,
       };
     })
-    .filter((item) => item.title || item.details || item.ImageURL);
+    .filter((item) => item.title || item.details || item.ImageURL || item.imageWarning);
 }
 
 function createSnapshot(announcements: WardAnnouncement[], source: 'live' | 'fallback'): LiveFeedSnapshot {

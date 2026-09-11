@@ -25,7 +25,7 @@ const WARD_CONFIG = {
   mapsUrl: 'https://maps.google.com/?q=5065+W+Janette+Ave,+West+Valley+City,+UT+84120',
   schedule: {
     sacramentTime: '12:00 PM',
-    secondHourTime: '1:10 PM',
+    secondHourTime: '11:10 PM',
     location: 'Stake Center Chapel',
   },
   links: {
@@ -99,6 +99,10 @@ function sanitizeAnnouncements(items: WardAnnouncement[]): WardAnnouncement[] {
   return items.map((item) => ({
     ...item,
     ImageURL: isSafeImageUrl(item.ImageURL) ? item.ImageURL : '',
+    imageWarning:
+      item.ImageURL && !isSafeImageUrl(item.ImageURL)
+        ? 'Image link was rejected on this device. Use a direct image URL from a supported host.'
+        : item.imageWarning,
   }));
 }
 
@@ -518,6 +522,13 @@ export default function GrangerLauncher() {
                         🔍 Tap to expand
                       </span>
                     </button>
+                  )}
+
+                  {item.imageWarning && (
+                    <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-800">
+                      <p className="font-semibold">Image not shown</p>
+                      <p className="mt-1 leading-relaxed">{item.imageWarning}</p>
+                    </div>
                   )}
 
                   {item.details && (
