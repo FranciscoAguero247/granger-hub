@@ -1,11 +1,12 @@
 import { LiveFeedSnapshot, WardAnnouncement } from '@/types/announcements';
+import { getSheetUrl } from '@/lib/site-config';
 
 const FALLBACK_ANNOUNCEMENTS: WardAnnouncement[] = [
   {
-    title: 'Weekly FHE',
-    details: "Check WhatsApp group for this week's location!",
-    date: 'Every Monday @ 7:00 PM',
-    category: 'FHE',
+    title: 'Connect your Google Sheet',
+    details: 'Use the admin panel on the homepage to paste your published CSV link and start showing live ward announcements.',
+    date: 'Setup needed',
+    category: 'Setup',
   },
 ];
 
@@ -15,6 +16,22 @@ function normalizeImageUrl(url: string): string {
   if (!url) return '';
 
   const trimmed = url.trim();
+
+  if (!trimmed || trimmed.includes('<') || trimmed.includes('object==typeof global')) {
+    return '';
+  }
+
+  let parsed: URL;
+
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    return '';
+  }
+
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    return '';
+  }
 
   if (trimmed.includes('drive.google.com') && trimmed.includes('/d/')) {
     const fileIdMatch = trimmed.match(/\/d\/([^/]+)/);
@@ -109,10 +126,10 @@ function createSnapshot(announcements: WardAnnouncement[], source: 'live' | 'fal
 }
 
 export async function fetchLiveFeedSnapshot(): Promise<LiveFeedSnapshot> {
-  const csvUrl = process.env.GOOGLE_SHEET_CSV_URL;
+  const csvUrl = await getSheetUrl();
 
   if (!csvUrl) {
-    throw new Error('Missing GOOGLE_SHEET_CSV_URL environment variable');
+    return createSnapshot(FALLBACK_ANNOUNCEMENTS, 'fallback');
   }
 
   try {
@@ -125,6 +142,12 @@ export async function fetchLiveFeedSnapshot(): Promise<LiveFeedSnapshot> {
     }
 
     const csvText = await response.text();
+    const normalizedStart = csvText.trimStart().toLowerCase();
+
+    if (normalizedStart.startsWith('<!doctype html') || normalizedStart.startsWith('<html')) {
+      throw new Error('Configured sheet URL returned HTML instead of CSV. Use the published CSV link.');
+    }
+
     const announcements = normalizeAnnouncements(csvText);
 
     return createSnapshot(announcements, 'live');

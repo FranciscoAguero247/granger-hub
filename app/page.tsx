@@ -60,6 +60,26 @@ function formatFeedVersion(version: string | null): string {
   return version.length > 10 ? `${version.slice(0, 10)}…` : version;
 }
 
+function isSafeImageUrl(value: string | undefined): boolean {
+  if (!value) {
+    return false;
+  }
+
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+function sanitizeAnnouncements(items: WardAnnouncement[]): WardAnnouncement[] {
+  return items.map((item) => ({
+    ...item,
+    ImageURL: isSafeImageUrl(item.ImageURL) ? item.ImageURL : '',
+  }));
+}
+
 async function fetchFeed(etag: string | null): Promise<{
   snapshot: LiveFeedSnapshot | null;
   etag: string | null;
@@ -105,6 +125,10 @@ export default function GrangerLauncher() {
   const [feedStatus, setFeedStatus] = useState<FeedStatus>('connecting');
   const [lastUpdatedAt, setLastUpdatedAt] = useState<string | null>(null);
   const [feedVersion, setFeedVersion] = useState<string | null>(null);
+  const [sheetUrl, setSheetUrl] = useState('');
+  const [sheetConfigUpdatedAt, setSheetConfigUpdatedAt] = useState<string | null>(null);
+  const [isSavingSheetUrl, setIsSavingSheetUrl] = useState(false);
+  const [sheetConfigMessage, setSheetConfigMessage] = useState<string | null>(null);
   const etagRef = useRef<string | null>(null);
   const versionRef = useRef<string | null>(null);
 
@@ -117,7 +141,7 @@ export default function GrangerLauncher() {
     const applySnapshot = (snapshot: LiveFeedSnapshot) => {
       versionRef.current = snapshot.version;
       setFeedVersion(snapshot.version);
-      setAnnouncements(snapshot.announcements);
+      setAnnouncements(sanitizeAnnouncements(snapshot.announcements));
       setLastUpdatedAt(snapshot.updatedAt);
 
       try {
@@ -221,6 +245,21 @@ export default function GrangerLauncher() {
       };
     };
 
+    void fetch('/api/config')
+      .then((response) => response.json())
+      .then((data: { sheetUrl?: string; updatedAt?: string | null }) => {
+        if (typeof data.sheetUrl === 'string') {
+          setSheetUrl(data.sheetUrl);
+        }
+
+        if (data.updatedAt) {
+          setSheetConfigUpdatedAt(data.updatedAt);
+        }
+      })
+      .catch((error) => {
+        console.error('Failed to load sheet config:', error);
+      });
+
     try {
       const cached = localStorage.getItem(FEED_CACHE_KEY);
       if (cached) {
@@ -251,6 +290,40 @@ export default function GrangerLauncher() {
       }
     };
   }, []);
+
+  const handleSaveSheetUrl = async () => {
+    setIsSavingSheetUrl(true);
+    setSheetConfigMessage(null);
+
+    try {
+      const response = await fetch('/api/config', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ sheetUrl }),
+      });
+
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(payload?.error || 'Unable to save sheet URL');
+      }
+
+      const payload = (await response.json()) as { updatedAt?: string | null };
+      if (payload.updatedAt) {
+        setSheetConfigUpdatedAt(payload.updatedAt);
+      }
+
+      setSheetConfigMessage('Saved. The site will now read announcements from this sheet.');
+      window.location.reload();
+    } catch (error) {
+      setSheetConfigMessage(
+        error instanceof Error ? error.message : 'Unable to save sheet URL',
+      );
+    } finally {
+      setIsSavingSheetUrl(false);
+    }
+  };
 
   return (
     <main className="min-h-screen bg-gradient-to-b from-slate-100 to-slate-200/80 flex items-center justify-center p-4 md:p-8 font-sans text-slate-900">
@@ -340,6 +413,48 @@ export default function GrangerLauncher() {
           <p className="text-[10px] text-slate-400">
             Last update: {formatLastUpdated(lastUpdatedAt)}
           </p>
+
+          <details className="rounded-xl border border-slate-200 bg-white p-3">
+            <summary className="cursor-pointer text-[11px] font-bold uppercase tracking-wider text-slate-500">
+              Sheet Setup for Non-Technical Users
+            </summary>
+            <div className="mt-3 space-y-3">
+              <p className="text-xs text-slate-600 leading-relaxed">
+                Create a Google Sheet, publish it as CSV, and paste the published link here.
+                No code changes are needed after this.
+              </p>
+              <ol className="space-y-1 text-xs text-slate-600 list-decimal pl-4">
+                <li>Create your sheet with Title, Details, Date, Category, and ImageURL columns.</li>
+                <li>Use File → Share → Publish to web and choose CSV format.</li>
+                <li>Paste the published CSV link below and save it.</li>
+              </ol>
+              <div className="space-y-2">
+                <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                  Published CSV URL
+                </label>
+                <input
+                  value={sheetUrl}
+                  onChange={(event) => setSheetUrl(event.target.value)}
+                  placeholder="https://docs.google.com/spreadsheets/d/e/.../pub?output=csv"
+                  className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20"
+                />
+                <button
+                  type="button"
+                  onClick={() => void handleSaveSheetUrl()}
+                  disabled={isSavingSheetUrl}
+                  className="w-full rounded-lg bg-indigo-600 px-3 py-2 text-xs font-bold text-white shadow-sm transition disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {isSavingSheetUrl ? 'Saving...' : 'Save Sheet Link'}
+                </button>
+                <p className="text-[10px] text-slate-400">
+                  Last saved: {formatLastUpdated(sheetConfigUpdatedAt)}
+                </p>
+                {sheetConfigMessage && (
+                  <p className="text-[11px] font-medium text-slate-600">{sheetConfigMessage}</p>
+                )}
+              </div>
+            </div>
+          </details>
 
           <div className="space-y-3">
             {announcements.length > 0 ? (
