@@ -81,9 +81,9 @@ function parseCSVRow(rowText: string): string[] {
 
 async function getLiveAnnouncements(): Promise<WardAnnouncement[]> {
   try {
-    const res = await fetch(GOOGLE_SHEET_CSV_URL, {
-      next: { revalidate: 60 },
-    });
+    const cacheBusterUrl = `${GOOGLE_SHEET_CSV_URL}&t=${Date.now()}`;
+
+    const res = await fetch(cacheBusterUrl, { cache: 'no-store' });
 
     if (!res.ok) throw new Error('Failed to fetch spreadsheet');
 
@@ -130,6 +130,11 @@ export default function GrangerLauncher() {
 
   useEffect(() => {
     getLiveAnnouncements().then(setAnnouncements);
+
+    const intervalId = setInterval(() => {
+      getLiveAnnouncements().then(setAnnouncements);
+    }, 30000);
+    return () => clearInterval(intervalId);
   }, []);
 
   return (
