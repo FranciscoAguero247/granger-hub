@@ -1,6 +1,13 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+
+interface WardAnnouncement {
+  title: string;
+  details: string;
+  date: string;
+  category: string;
+}
 
 const WARD_CONFIG = {
   wardName: 'Granger YSA Ward',
@@ -20,7 +27,6 @@ const WARD_CONFIG = {
   },
   leadership: [
     {
-      name: 'Bishopric',
       role: 'Ward Leadership',
       fbHandle: 'trisha.peck.959148', 
     },
@@ -32,8 +38,45 @@ const WARD_CONFIG = {
   ],
 };
 
+const GOOGLE_SHEET_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRgej0blV-BFCq2JB5gAiDF6VoO0r_kkk7U55VBCUru-kB-QESzeGtel3BCToM1kVgD3Fy4Tm8Tbhjt/pub?output=csv';
+
+async function getLiveAnnouncements(): Promise<WardAnnouncement[]> {
+  try {
+    const res = await fetch(GOOGLE_SHEET_CSV_URL, { next: { revalidate: 60 } });
+    next: { revalidate: 60 };
+    const text = await res.text();
+    
+    const rows = text.split('\n').slice(1);
+
+    return rows.map((row: string) => {
+      const [title, details, date, category] = row.split(',');
+      return {
+        title: title || '',
+        details: details || '',
+        date: date || '',
+        category: category || 'Announcement',
+      };
+    });
+  } catch (error) {
+    console.error('Failed to load announcements from Google Sheets:', error);
+    return [
+      {
+        title: 'Weekly FHE',
+        details: 'Check WhatsApp group for this week\'s location!',
+        date: 'Every Monday @ 7:00 PM',
+        category: 'FHE',
+      },
+    ];
+  }
+}
+
 export default function GrangerLauncher() {
   const [showPwaModal, setShowPwaModal] = useState(false);
+  const [announcements, setAnnouncements] = useState<WardAnnouncement[]>([]);
+
+  useEffect(() => {
+    getLiveAnnouncements().then(setAnnouncements);
+  }, []);
 
   return (
     <main className="min-h-screen bg-gradient-to-b from-slate-100 to-slate-200/80 flex items-center justify-center p-4 md:p-8 font-sans text-slate-900">
@@ -44,6 +87,33 @@ export default function GrangerLauncher() {
           </span>
           <h1 className="text-2xl md:text-3xl font-black mt-3 tracking-tight">{WARD_CONFIG.wardName}</h1>
           <p className="text-xs md:text-sm text-indigo-100 mt-1">Official Communications Place</p>
+        </div>
+
+        <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-3">
+          <div className="flex items-center justify-between">
+            <h2 className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+              📢 Live Ward Announcements
+            </h2>
+            <span className="flex h-2 w-2 relative">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+            </span>
+          </div>
+
+          <div className="space-y-2">
+            {announcements.map((item, index) => (
+              <div key={index} className="bg-white p-3 rounded-lg border border-slate-200 shadow-sm space-y-1">
+                <div className="flex items-center justify-between">
+                  <span className="text-[9px] font-extrabold uppercase px-2 py-0.5 bg-indigo-50 text-indigo-600 rounded">
+                    {item.category}
+                  </span>
+                  <span className="text-[10px] text-slate-400 font-medium">{item.date}</span>
+                </div>
+                <h3 className="text-xs font-bold text-slate-800">{item.title}</h3>
+                <p className="text-[11px] text-slate-600 leading-relaxed">{item.details}</p>
+              </div>
+            ))}
+          </div>
         </div>
 
         <div className="p-5 md:p-7 lg:p-8 grid gap-6 md:grid-cols-2 md:items-start">
