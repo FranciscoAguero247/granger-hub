@@ -1,8 +1,5 @@
 import { LiveFeedSnapshot, WardAnnouncement } from '@/types/announcements';
 
-const DEFAULT_CSV_URL =
-  'https://docs.google.com/spreadsheets/d/e/2PACX-1vRgej0blV-BFCq2JB5gAiDF6VoO0r_kkk7U55VBCUru-kB-QESzeGtel3BCToM1kVgD3Fy4Tm8Tbhjt/pub?output=csv';
-
 const FALLBACK_ANNOUNCEMENTS: WardAnnouncement[] = [
   {
     title: 'Weekly FHE',
@@ -112,7 +109,11 @@ function createSnapshot(announcements: WardAnnouncement[], source: 'live' | 'fal
 }
 
 export async function fetchLiveFeedSnapshot(): Promise<LiveFeedSnapshot> {
-  const csvUrl = process.env.GOOGLE_SHEET_CSV_URL || DEFAULT_CSV_URL;
+  const csvUrl = process.env.GOOGLE_SHEET_CSV_URL;
+
+  if (!csvUrl) {
+    throw new Error('Missing GOOGLE_SHEET_CSV_URL environment variable');
+  }
 
   try {
     const response = await fetch(csvUrl, {

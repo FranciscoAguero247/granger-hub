@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import Image from 'next/image';
 import type { LiveFeedSnapshot, WardAnnouncement } from '@/types/announcements';
 
 const FEED_CACHE_KEY = 'ward-feed-cache-v1';
@@ -51,6 +52,14 @@ function formatLastUpdated(isoDate: string | null): string {
   });
 }
 
+function formatFeedVersion(version: string | null): string {
+  if (!version) {
+    return 'waiting';
+  }
+
+  return version.length > 10 ? `${version.slice(0, 10)}…` : version;
+}
+
 async function fetchFeed(etag: string | null): Promise<{
   snapshot: LiveFeedSnapshot | null;
   etag: string | null;
@@ -95,6 +104,7 @@ export default function GrangerLauncher() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [feedStatus, setFeedStatus] = useState<FeedStatus>('connecting');
   const [lastUpdatedAt, setLastUpdatedAt] = useState<string | null>(null);
+  const [feedVersion, setFeedVersion] = useState<string | null>(null);
   const etagRef = useRef<string | null>(null);
   const versionRef = useRef<string | null>(null);
 
@@ -106,6 +116,7 @@ export default function GrangerLauncher() {
 
     const applySnapshot = (snapshot: LiveFeedSnapshot) => {
       versionRef.current = snapshot.version;
+      setFeedVersion(snapshot.version);
       setAnnouncements(snapshot.announcements);
       setLastUpdatedAt(snapshot.updatedAt);
 
@@ -309,6 +320,23 @@ export default function GrangerLauncher() {
               </div>
           </div>
 
+          <div className="grid gap-2 rounded-xl border border-slate-200 bg-white p-3 md:grid-cols-3">
+            <div>
+              <p className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Current Version</p>
+              <p className="mt-1 text-xs font-semibold text-slate-700">{formatFeedVersion(feedVersion)}</p>
+            </div>
+            <div>
+              <p className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Last Refresh</p>
+              <p className="mt-1 text-xs font-semibold text-slate-700">{formatLastUpdated(lastUpdatedAt)}</p>
+            </div>
+            <div>
+              <p className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Source</p>
+              <p className="mt-1 text-xs font-semibold text-slate-700">
+                {feedStatus === 'polling' ? 'Polling fallback' : 'Live sync active'}
+              </p>
+            </div>
+          </div>
+
           <p className="text-[10px] text-slate-400">
             Last update: {formatLastUpdated(lastUpdatedAt)}
           </p>
@@ -341,11 +369,13 @@ export default function GrangerLauncher() {
                       onClick={() => setActiveFlyer({ url: item.ImageURL!, title: item.title })}
                       className="group relative w-full rounded-lg overflow-hidden border border-slate-200 my-2 bg-slate-100 block text-left focus:outline-none focus:ring-2 focus:ring-indigo-500"
                     >
-                      <img
+                      <Image
                         src={item.ImageURL}
                         alt={item.title || 'Event Flyer'}
+                        width={1200}
+                        height={1600}
+                        sizes="(max-width: 768px) 100vw, (max-width: 1024px) 50vw, 600px"
                         className="w-full h-auto object-cover max-h-96 rounded-lg group-hover:scale-[1.01] transition-transform duration-200"
-                        loading="lazy"
                       />
                       <span className="absolute bottom-2 right-2 bg-slate-900/75 text-white text-[10px] font-medium px-2 py-1 rounded-md backdrop-blur-sm opacity-90 group-hover:opacity-100 transition-opacity">
                         🔍 Tap to expand
@@ -504,10 +534,13 @@ export default function GrangerLauncher() {
             >
               ✕ Close
             </button>
-            <img
+            <Image
               src={activeFlyer.url}
               alt={activeFlyer.title || 'Event Flyer'}
-              className="max-w-full max-h-[80vh] object-contain rounded-xl shadow-2xl border border-slate-700/50"
+              width={1600}
+              height={2200}
+              sizes="100vw"
+              className="max-w-full max-h-[80vh] w-auto h-auto object-contain rounded-xl shadow-2xl border border-slate-700/50"
             />
             {activeFlyer.title && (
               <p className="text-xs font-medium text-slate-300 mt-3 text-center">
