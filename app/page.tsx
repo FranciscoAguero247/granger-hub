@@ -1,14 +1,12 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import type { LiveFeedSnapshot, WardAnnouncement } from '@/types/announcements';
 
-interface WardAnnouncement {
-  title: string;
-  details: string;
-  date: string;
-  category: string;
-  ImageURL?: string;
-}
+const FEED_CACHE_KEY = 'ward-feed-cache-v1';
+const FEED_POLL_INTERVAL_MS = 45000;
+
+type FeedStatus = 'connecting' | 'live' | 'polling';
 
 const WARD_CONFIG = {
   wardName: 'Granger YSA Ward',
@@ -37,90 +35,57 @@ const WARD_CONFIG = {
   ],
 };
 
-const GOOGLE_SHEET_CSV_URL =
-  'https://docs.google.com/spreadsheets/d/e/2PACX-1vRgej0blV-BFCq2JB5gAiDF6VoO0r_kkk7U55VBCUru-kB-QESzeGtel3BCToM1kVgD3Fy4Tm8Tbhjt/pub?output=csv';
-
-function normalizeImageUrl(url: string): string {
-  if (!url) return '';
-  const trimmed = url.trim();
-
-  if (trimmed.includes('drive.google.com') && trimmed.includes('/d/')) {
-    const fileIdMatch = trimmed.match(/\/d\/([^\/]+)/);
-    if (fileIdMatch && fileIdMatch[1]) {
-      return `https://drive.google.com/uc?export=view&id=${fileIdMatch[1]}`;
-    }
+function formatLastUpdated(isoDate: string | null): string {
+  if (!isoDate) {
+    return 'Waiting for first sync';
   }
-  return trimmed;
+
+  const date = new Date(isoDate);
+  if (Number.isNaN(date.getTime())) {
+    return 'Waiting for first sync';
+  }
+
+  return date.toLocaleTimeString([], {
+    hour: 'numeric',
+    minute: '2-digit',
+  });
 }
 
-function parseCSVRow(rowText: string): string[] {
-  const result: string[] = [];
-  let currentToken = '';
-  let insideQuotes = false;
+async function fetchFeed(etag: string | null): Promise<{
+  snapshot: LiveFeedSnapshot | null;
+  etag: string | null;
+  notModified: boolean;
+}> {
+  const headers: HeadersInit = {};
 
-  for (let i = 0; i < rowText.length; i++) {
-    const char = rowText[i];
-
-    if (char === '"') {
-      if (insideQuotes && rowText[i + 1] === '"') {
-        currentToken += '"';
-        i++;
-      } else {
-        insideQuotes = !insideQuotes;
-      }
-    } else if (char === ',' && !insideQuotes) {
-      result.push(currentToken.trim());
-      currentToken = '';
-    } else {
-      currentToken += char;
-    }
+  if (etag) {
+    headers['If-None-Match'] = etag;
   }
-  result.push(currentToken.trim());
-  return result;
-}
 
-async function getLiveAnnouncements(): Promise<WardAnnouncement[]> {
-  try {
-    const cacheBusterUrl = `${GOOGLE_SHEET_CSV_URL}&t=${Date.now()}`;
+  const response = await fetch('/api/feed', {
+    cache: 'no-store',
+    headers,
+  });
 
-    const res = await fetch(cacheBusterUrl, { cache: 'no-store' });
-
-    if (!res.ok) throw new Error('Failed to fetch spreadsheet');
-
-    const text = await res.text();
-    const lines = text.split(/\r?\n/).filter((line) => line.trim() !== '');
-
-    if (lines.length <= 1) return [];
-
-    return lines
-      .slice(1)
-      .map((line: string) => {
-        const cols = parseCSVRow(line);
-        const imageUrl = normalizeImageUrl(cols[4] || '');
-        const rawTitle = cols[0] || '';
-
-        const title = rawTitle || (imageUrl ? 'Event Flyer' : '');
-
-        return {
-          title,
-          details: cols[1] || '',
-          date: cols[2] || '',
-          category: cols[3] || 'Flyer',
-          ImageURL: imageUrl,
-        };
-      })
-      .filter((item) => item.title || item.details || item.ImageURL);
-  } catch (error) {
-    console.error('Failed to load announcements from Google Sheets:', error);
-    return [
-      {
-        title: 'Weekly FHE',
-        details: "Check WhatsApp group for this week's location!",
-        date: 'Every Monday @ 7:00 PM',
-        category: 'FHE',
-      },
-    ];
+  if (response.status === 304) {
+    return {
+      snapshot: null,
+      etag,
+      notModified: true,
+    };
   }
+
+  if (!response.ok) {
+    throw new Error(`Feed request failed with status ${response.status}`);
+  }
+
+  const snapshot = (await response.json()) as LiveFeedSnapshot;
+
+  return {
+    snapshot,
+    etag: response.headers.get('etag') || etag,
+    notModified: false,
+  };
 }
 
 export default function GrangerLauncher() {
@@ -128,22 +93,152 @@ export default function GrangerLauncher() {
   const [announcements, setAnnouncements] = useState<WardAnnouncement[]>([]);
   const [activeFlyer, setActiveFlyer] = useState<{ url: string; title: string } | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [feedStatus, setFeedStatus] = useState<FeedStatus>('connecting');
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<string | null>(null);
+  const etagRef = useRef<string | null>(null);
+  const versionRef = useRef<string | null>(null);
 
   useEffect(() => {
-    setIsRefreshing(true);
-    getLiveAnnouncements().then((data) => {
-      setAnnouncements(data);
-      setIsRefreshing(false);
-    });
+    let isMounted = true;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let eventSource: EventSource | null = null;
+    let reconnectAttempts = 0;
+
+    const applySnapshot = (snapshot: LiveFeedSnapshot) => {
+      versionRef.current = snapshot.version;
+      setAnnouncements(snapshot.announcements);
+      setLastUpdatedAt(snapshot.updatedAt);
+
+      try {
+        localStorage.setItem(FEED_CACHE_KEY, JSON.stringify(snapshot));
+      } catch {
+        // Ignore storage errors on restricted devices.
+      }
+    };
+
+    const refreshFeed = async (showSpinner: boolean) => {
+      if (!isMounted) {
+        return;
+      }
+
+      if (showSpinner) {
+        setIsRefreshing(true);
+      }
+
+      try {
+        const { snapshot, etag } = await fetchFeed(etagRef.current);
+        if (!isMounted) {
+          return;
+        }
+
+        if (etag) {
+          etagRef.current = etag;
+        }
+
+        if (snapshot) {
+          applySnapshot(snapshot);
+        }
+      } catch (error) {
+        console.error('Failed to refresh announcements feed:', error);
+        if (isMounted) {
+          setFeedStatus('polling');
+        }
+      } finally {
+        if (showSpinner && isMounted) {
+          setIsRefreshing(false);
+        }
+      }
+    };
+
+    const connectSse = () => {
+      if (!isMounted) {
+        return;
+      }
+
+      setFeedStatus('connecting');
+      eventSource = new EventSource('/api/updates');
+
+      eventSource.addEventListener('connected', () => {
+        if (!isMounted) {
+          return;
+        }
+
+        reconnectAttempts = 0;
+        setFeedStatus('live');
+      });
+
+      eventSource.addEventListener('version', (event) => {
+        if (!isMounted) {
+          return;
+        }
+
+        setFeedStatus('live');
+        const message = event as MessageEvent<string>;
+
+        try {
+          const payload = JSON.parse(message.data) as { version?: string };
+          if (payload.version && payload.version !== versionRef.current) {
+            void refreshFeed(true);
+          }
+        } catch (error) {
+          console.error('Invalid version event payload:', error);
+        }
+      });
+
+      eventSource.addEventListener('ping', () => {
+        if (isMounted) {
+          setFeedStatus('live');
+        }
+      });
+
+      eventSource.onerror = () => {
+        if (!isMounted) {
+          return;
+        }
+
+        setFeedStatus('polling');
+
+        if (eventSource) {
+          eventSource.close();
+          eventSource = null;
+        }
+
+        reconnectAttempts += 1;
+        const exponentialDelay = Math.min(30000, 1000 * 2 ** Math.min(reconnectAttempts, 5));
+        const jitter = Math.floor(Math.random() * 500);
+        reconnectTimer = setTimeout(connectSse, exponentialDelay + jitter);
+      };
+    };
+
+    try {
+      const cached = localStorage.getItem(FEED_CACHE_KEY);
+      if (cached) {
+        const parsed = JSON.parse(cached) as LiveFeedSnapshot;
+        if (parsed?.announcements && parsed?.version) {
+          applySnapshot(parsed);
+        }
+      }
+    } catch {
+      // Ignore invalid cache payloads.
+    }
+
+    void refreshFeed(true);
+    connectSse();
 
     const intervalId = setInterval(() => {
-      setIsRefreshing(true);
-      getLiveAnnouncements().then((data) => {
-        setAnnouncements(data);
-        setIsRefreshing(false);
-      });
-    }, 30000);
-    return () => clearInterval(intervalId);
+      void refreshFeed(false);
+    }, FEED_POLL_INTERVAL_MS);
+
+    return () => {
+      isMounted = false;
+      clearInterval(intervalId);
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+      }
+      if (eventSource) {
+        eventSource.close();
+      }
+    };
   }, []);
 
   return (
@@ -192,6 +287,16 @@ export default function GrangerLauncher() {
                     </svg>
                     <span className="text-[9px] font-semibold text-indigo-600">Syncing...</span>
                   </>
+                ) : feedStatus === 'connecting' ? (
+                  <>
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
+                    <span className="text-[9px] font-semibold text-amber-600">Connecting...</span>
+                  </>
+                ) : feedStatus === 'polling' ? (
+                  <>
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-orange-500"></span>
+                    <span className="text-[9px] font-semibold text-orange-600">Polling Fallback</span>
+                  </>
                 ) : (
                   <>
                     <span className="flex h-2 w-2 relative">
@@ -204,11 +309,15 @@ export default function GrangerLauncher() {
               </div>
           </div>
 
+          <p className="text-[10px] text-slate-400">
+            Last update: {formatLastUpdated(lastUpdatedAt)}
+          </p>
+
           <div className="space-y-3">
             {announcements.length > 0 ? (
               announcements.map((item, index) => (
                 <div
-                  key={index}
+                  key={`${item.title}-${item.date}-${item.ImageURL || 'no-image'}-${index}`}
                   className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-sm space-y-2 overflow-hidden"
                 >
                   <div className="flex items-center justify-between">
