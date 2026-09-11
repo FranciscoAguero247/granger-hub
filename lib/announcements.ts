@@ -12,6 +12,15 @@ const FALLBACK_ANNOUNCEMENTS: WardAnnouncement[] = [
 
 let lastSnapshot: LiveFeedSnapshot | null = null;
 
+const ALLOWED_IMAGE_HOSTS = new Set([
+  'drive.google.com',
+  'docs.google.com',
+  'lh3.googleusercontent.com',
+  'i.postimg.cc',
+]);
+
+const IMAGE_FILE_EXTENSION_REGEX = /\.(png|jpe?g|webp|gif|avif|svg)$/i;
+
 function normalizeImageUrl(url: string): string {
   if (!url) return '';
 
@@ -33,11 +42,24 @@ function normalizeImageUrl(url: string): string {
     return '';
   }
 
+  if (parsed.hostname === 'postimg.cc') {
+    // postimg.cc links are HTML landing pages, not direct image files.
+    return '';
+  }
+
   if (trimmed.includes('drive.google.com') && trimmed.includes('/d/')) {
     const fileIdMatch = trimmed.match(/\/d\/([^/]+)/);
     if (fileIdMatch?.[1]) {
       return `https://drive.google.com/uc?export=view&id=${fileIdMatch[1]}`;
     }
+  }
+
+  if (!ALLOWED_IMAGE_HOSTS.has(parsed.hostname)) {
+    return '';
+  }
+
+  if (parsed.hostname === 'i.postimg.cc' && !IMAGE_FILE_EXTENSION_REGEX.test(parsed.pathname)) {
+    return '';
   }
 
   return trimmed;

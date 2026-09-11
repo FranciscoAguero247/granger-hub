@@ -9,6 +9,15 @@ const FEED_POLL_INTERVAL_MS = 45000;
 
 type FeedStatus = 'connecting' | 'live' | 'polling';
 
+const ALLOWED_IMAGE_HOSTS = new Set([
+  'drive.google.com',
+  'docs.google.com',
+  'lh3.googleusercontent.com',
+  'i.postimg.cc',
+]);
+
+const IMAGE_FILE_EXTENSION_REGEX = /\.(png|jpe?g|webp|gif|avif|svg)$/i;
+
 const WARD_CONFIG = {
   wardName: 'Granger YSA Ward',
   stakeName: 'Taylorsville Utah YSA Stake',
@@ -67,7 +76,20 @@ function isSafeImageUrl(value: string | undefined): boolean {
 
   try {
     const parsed = new URL(value);
-    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+    const isHttp = parsed.protocol === 'http:' || parsed.protocol === 'https:';
+    if (!isHttp) {
+      return false;
+    }
+
+    if (!ALLOWED_IMAGE_HOSTS.has(parsed.hostname)) {
+      return false;
+    }
+
+    if (parsed.hostname === 'i.postimg.cc') {
+      return IMAGE_FILE_EXTENSION_REGEX.test(parsed.pathname);
+    }
+
+    return true;
   } catch {
     return false;
   }
